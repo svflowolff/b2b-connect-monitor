@@ -30,37 +30,37 @@ import requests
 
 SLACK_TOKEN = os.environ["SLACK_BOT_TOKEN"]
 CHANNEL_ID = os.environ["SLACK_CHANNEL_ID"]
-TOPIC = os.environ.get("REMINDER_TOPIC", "die offene Aufgabe")
+TOPIC = os.environ.get("REMINDER_TOPIC", "next week's B2B Connect Brand campaign")
 
-# Marker, an dem wir unsere eigenen Bot-Nachrichten erkennen.
-# Bitte nicht in normalen Channel-Nachrichten verwenden, sonst "verwechselt"
-# der Bot fremde Nachrichten mit eigenen.
+# Marker we use to identify our own bot messages.
+# Don't use this string in regular channel messages or the bot will confuse
+# them with its own.
 MARKER = "🔔 [Daily-Reminder]"
 
-# Reminder-Texte pro Tag im Zyklus (1=Do, 2=Fr, 3=Sa, 4=So).
-# {topic} wird durch REMINDER_TOPIC ersetzt.
+# Reminder texts per cycle day (1=Thu, 2=Fri, 3=Sat, 4=Sun).
+# {topic} is replaced by the REMINDER_TOPIC env var.
 MESSAGES: dict[int, str] = {
     1: (
         f"{MARKER}\n"
-        "Moin zusammen! Bitte denkt heute an *{topic}*. "
-        "Wenn erledigt, einfach mit einem Emoji bestätigen ✅ – "
-        "dann meld ich mich erst nächsten Donnerstag wieder."
+        "Morning team! Quick check: is *{topic}* planned and ready? "
+        "Drop any emoji on this message to confirm – "
+        "I'll then go quiet until next Thursday."
     ),
     2: (
         f"{MARKER}\n"
-        "Freundliche Erinnerung – *{topic}* steht noch aus. "
-        "Reaktion = Pause bis nächste Woche 🙏"
+        "Friendly nudge – is *{topic}* sorted yet? "
+        "One emoji on this message and I'm off your back until next week 🙏"
     ),
     3: (
         f"{MARKER}\n"
-        "Wochenend-Push: bitte heute oder morgen *{topic}* abhaken. "
-        "Ein Klick auf irgendein Emoji genügt 😉"
+        "Weekend nudge: please lock in *{topic}* today or tomorrow. "
+        "Any emoji on this message works as confirmation 😉"
     ),
     4: (
         f"{MARKER}\n"
-        "Letzter Aufruf für diese Runde – *{topic}*. "
-        "Falls's bis Sonntagabend nicht passiert, "
-        "fang ich Donnerstag wieder an zu nerven 🙃"
+        "Last call for this cycle – *{topic}*. "
+        "If we don't hear back by tonight, "
+        "I'll start nudging again on Thursday 🙃"
     ),
 }
 
