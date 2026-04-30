@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-"""
 Slack Diagnose-Skript
 =====================
 Hilft dabei, channel_not_found / missing_scope / invalid_auth Fehler zu finden.
