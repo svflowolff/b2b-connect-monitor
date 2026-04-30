@@ -3,16 +3,6 @@
 Slack Diagnose-Skript
 =====================
 Hilft dabei, channel_not_found / missing_scope / invalid_auth Fehler zu finden.
-
-Macht drei Slack-API-Calls und gibt strukturiert aus, was Slack zurückgibt:
-
-  1. auth.test            – Wer bin ich (Token-Identität)?
-  2. conversations.info   – Sieht der Bot den Channel?
-  3. conversations.list   – Welche Channels sieht der Bot überhaupt?
-
-Liest dieselben ENV-Variablen wie reminder.py:
-    SLACK_BOT_TOKEN
-    SLACK_CHANNEL_ID
 """
 from __future__ import annotations
 
@@ -28,7 +18,6 @@ SLACK_API = "https://slack.com/api"
 
 
 def call(method: str, params: dict | None = None, body: dict | None = None) -> dict:
-    """Macht einen Slack-Call und gibt das JSON zurück (auch bei Slack-Fehlern)."""
     headers = {"Authorization": f"Bearer {SLACK_TOKEN}"}
     if body is not None:
         headers["Content-Type"] = "application/json; charset=utf-8"
@@ -46,58 +35,69 @@ def banner(label: str) -> None:
 
 
 def main() -> int:
-    banner("1) auth.test  – Welche App / welcher Workspace nutzt dieses Token?")
+    banner("1) auth.test  - Welche App / welcher Workspace nutzt dieses Token?")
     auth = call("auth.test", body={})
     print(json.dumps(auth, indent=2))
     if not auth.get("ok"):
-        print("\n>> Token ist ungültig oder abgelaufen. SLACK_BOT_TOKEN aktualisieren.")
+        print("\n>> Token ist ungueltig oder abgelaufen.")
         return 1
     print(f"\n>> Workspace: {auth.get('team')}  (team_id={auth.get('team_id')})")
-    print(f">> Bot-User:  @{auth.get('user')}    (bot_id={auth.get('bot_id')})")
-    print(f">> Enterprise: {auth.get('enterprise_id') or 'nein (Standard-Workspace)'}")
+    print(f">> Bot-User:  @{auth.get('user')}    (user_id={auth.get('user_id')})")
+    print(f">> Enterprise: {auth.get('enterprise_id') or 'nein'}")
 
-    banner(f"2) conversations.info  – Sieht das Token den Channel {CHANNEL_ID}?")
+    banner(f"2) conversations.info  - Sieht das Token den Channel {CHANNEL_ID}?")
     info = call("conversations.info", params={"channel": CHANNEL_ID})
     print(json.dumps(info, indent=2))
     if info.get("ok"):
         ch = info["channel"]
         print(f"\n>> Channel-Name:    #{ch.get('name')}")
         print(f">> ist_privat:      {ch.get('is_private')}")
-        print(f">> ist_member:      {ch.get('is_member')}  (False = Bot ist NICHT im Channel)")
+        print(f">> ist_member:      {ch.get('is_member')}")
         print(f">> ist_shared:      {ch.get('is_shared')}")
+        print(f">> ist_ext_shared:  {ch.get('is_ext_shared')}")
         print(f">> ist_org_shared:  {ch.get('is_org_shared')}")
     else:
         err = info.get("error", "unknown")
         print(f"\n>> Fehler: {err}")
-        if err == "channel_not_found":
-            print(">> Höchstwahrscheinlich: Channel existiert in einem anderen Workspace,")
-            print(">> oder ist ein Org-wide-Channel und die App ist nicht org-weit installiert.")
-        elif err == "not_in_channel":
-            print(">> Bot muss in den Channel eingeladen werden: /invite @<bot-name>")
-        elif err == "missing_scope":
-            print(">> Scope fehlt. needed:", info.get("needed"), "provided:", info.get("provided"))
 
-    banner("3) conversations.list  – Welche Channels sieht das Token überhaupt?")
+    banner("3) conversations.list (nur public_channel)  - Welche Public-Channels sieht das Token?")
     listed = call(
         "conversations.list",
-        params={"types": "public_channel,private_channel", "limit": 1000},
+        params={"types": "public_channel", "exclude_archived": "true", "limit": 1000},
     )
     if listed.get("ok"):
         channels = listed.get("channels", [])
-        print(f"Token sieht {len(channels)} Channel(s):\n")
-        for ch in channels[:50]:
-            marker = " <-- DAS IST DER GESUCHTE" if ch["id"] == CHANNEL_ID else ""
-            privacy = "🔒" if ch.get("is_private") else "#"
-            member = "✓" if ch.get("is_member") else "✗"
-            print(f"  {privacy} {ch['id']}  member={member}  name={ch['name']}{marker}")
-        if len(channels) > 50:
-            print(f"  ... ({len(channels) - 50} weitere abgeschnitten)")
-        if not any(ch["id"] == CHANNEL_ID for ch in channels):
-            print(f"\n>> ⚠️  Die gesuchte Channel-ID {CHANNEL_ID} ist NICHT in dieser Liste.")
-            print(">> Mögliche Gründe: falsche ID, anderer Workspace, oder Org-wide-Channel.")
+        print(f"Token sieht {len(channels)} public Channel(s) im Workspace.\n")
+        member_chans = [c for c in channels if c.get("is_member")]
+        print(f"-- Davon ist der Bot Member in {len(member_chans)} Channel(s):")
+        for ch in member_chans:
+            marker = "  <-- ZIEL!" if ch["id"] == CHANNEL_ID else ""
+            print(f"   #{ch['name']:30s}  id={ch['id']}{marker}")
+        match = next((c for c in channels if c["id"] == CHANNEL_ID), None)
+        if match:
+            print(f"\n>> Channel-ID {CHANNEL_ID} ist in der Public-Liste:")
+            print(f"   name={match['name']}, is_member={match.get('is_member')}, "
+                  f"is_shared={match.get('is_shared')}, is_ext_shared={match.get('is_ext_shared')}, "
+                  f"is_org_shared={match.get('is_org_shared')}")
+        else:
+            print(f"\n>> Channel-ID {CHANNEL_ID} ist NICHT in der Public-Liste.")
+            print(">> Bedeutet: Token sieht den Channel im Workspace nicht.")
     else:
         print(json.dumps(listed, indent=2))
         print(f"\n>> conversations.list scheiterte: {listed.get('error')}")
+
+    banner(f"4) conversations.members  - Wer ist Member im Channel {CHANNEL_ID}?")
+    mem = call("conversations.members", params={"channel": CHANNEL_ID, "limit": 200})
+    print(json.dumps(mem, indent=2)[:1500])
+    if mem.get("ok"):
+        members = mem.get("members", [])
+        bot_user_id = auth.get("user_id")
+        print(f"\n>> Channel hat {len(members)} Member.")
+        if bot_user_id in members:
+            print(f">> Bot ({bot_user_id}) ist als Member gelistet.")
+        else:
+            print(f">> Bot ({bot_user_id}) ist NICHT in der Member-Liste.")
+            print(">> Loesung: in Slack im Channel '/invite @b2b_connect_monitor' ausfuehren.")
 
     banner("Fertig")
     return 0
