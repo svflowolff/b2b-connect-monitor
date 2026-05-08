@@ -82,22 +82,38 @@ def fetch_history(oldest_ts: float) -> list[dict]:
     return messages
 
 
+def message_has_reaction(channel: str, ts: str) -> bool:
+    """
+    Verifiziert Reactions ueber den dedizierten reactions.get-Endpunkt.
+    Robuster als das reactions-Feld in conversations.history, das je
+    nach Scopes/Caching nicht immer geliefert wird.
+    Benoetigt Scope: reactions:read
+    """
+    try:
+        data = slack_call("reactions.get", {"channel": channel, "timestamp": ts})
+        reactions = data.get("message", {}).get("reactions", [])
+        return sum(r.get("count", 0) for r in reactions) > 0
+    except Exception as e:
+        print(f"[reminder] reactions.get fehlgeschlagen fuer ts={ts}: {e}")
+        return False
+
+
 def main() -> int:
     now_berlin = datetime.now(BERLIN)
     print(f"[reminder] Aktuelle Berlin-Zeit: {now_berlin:%Y-%m-%d %H:%M %Z}")
 
     force_run = os.environ.get("FORCE_RUN", "").lower() == "true"
     if force_run:
-        print("[reminder] FORCE_RUN=true - Wochentag/Stunden-Check uebersprungen.")
+        print("[reminder] FORCE_RUN=true - Wochentag-Check uebersprungen.")
 
     weekday = now_berlin.weekday()
     if not force_run and weekday not in (3, 4, 5, 6):
         print(f"[reminder] Wochentag {weekday} - kein Send-Tag. Skip.")
         return 0
 
-    if not force_run and now_berlin.hour != 10:
-        print(f"[reminder] Berlin-Stunde {now_berlin.hour} != 10. Skip.")
-        return 0
+    # KEIN hour-Check mehr. GitHub Actions Cron-Jobs verspaeten sich
+    # routinemaessig 1-3 Stunden, der alte Stunde-genau-10-Check hat
+    # damit fast jeden Lauf gekillt. Idempotenz unten ueber sent_today.
 
     days_since_thursday = (weekday - 3) % 7
     last_thursday = now_berlin.replace(
@@ -116,7 +132,18 @@ def main() -> int:
         f"davon {len(bot_messages)} eigene."
     )
 
-    has_reaction = any(len(m.get("reactions", [])) > 0 for m in bot_messages)
+    # Reaction-Check: erst inline, dann verifiziert via reactions.get
+    has_reaction = False
+    for m in bot_messages:
+        ts = m.get("ts")
+        if not ts:
+            continue
+        inline_count = sum(r.get("count", 0) for r in m.get("reactions", []))
+        api_confirms = message_has_reaction(CHANNEL_ID, ts)
+        print(f"[reminder]   ts={ts}: inline_reactions={inline_count}, api_confirms={api_confirms}")
+        if inline_count > 0 or api_confirms:
+            has_reaction = True
+
     if has_reaction:
         print("[reminder] Bestaetigung gefunden - heute keine Nachricht.")
         return 0
