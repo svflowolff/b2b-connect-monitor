@@ -98,6 +98,28 @@ def message_has_reaction(channel: str, ts: str) -> bool:
         return False
 
 
+def get_own_identity() -> tuple[str, str]:
+    """
+    Eigene Bot-User-ID + Bot-ID aus auth.test holen.
+    Brauchen wir, um eigene Nachrichten in der Channel-History sicher zu
+    identifizieren - unabhaengig vom Text/Marker-String.
+    """
+    data = slack_call("auth.test", {})
+    return data.get("user_id", ""), data.get("bot_id", "")
+
+
+def is_own_message(msg: dict, own_user_id: str, own_bot_id: str) -> bool:
+    """
+    True wenn die Nachricht von uns selbst stammt. Nutzt user_id und bot_id
+    aus auth.test - robust gegen Slack-Emoji/Text-Rendering-Quirks.
+    """
+    if own_user_id and msg.get("user") == own_user_id:
+        return True
+    if own_bot_id and msg.get("bot_id") == own_bot_id:
+        return True
+    return False
+
+
 def main() -> int:
     now_berlin = datetime.now(BERLIN)
     print(f"[reminder] Aktuelle Berlin-Zeit: {now_berlin:%Y-%m-%d %H:%M %Z}")
@@ -115,6 +137,9 @@ def main() -> int:
     # routinemaessig 1-3 Stunden, der alte Stunde-genau-10-Check hat
     # damit fast jeden Lauf gekillt. Idempotenz unten ueber sent_today.
 
+    own_user_id, own_bot_id = get_own_identity()
+    print(f"[reminder] Eigene Identitaet: user_id={own_user_id} bot_id={own_bot_id}")
+
     days_since_thursday = (weekday - 3) % 7
     last_thursday = now_berlin.replace(
         hour=0, minute=0, second=0, microsecond=0
@@ -126,7 +151,11 @@ def main() -> int:
     )
 
     messages = fetch_history(oldest_ts)
-    bot_messages = [m for m in messages if MARKER in m.get("text", "")]
+
+    # Eigene Nachrichten ueber user_id / bot_id identifizieren statt ueber
+    # einen Marker-String im Text. Das macht den Check immun gegen Slack-API-
+    # Quirks (z.B. Emojis, die als Shortcode :bell: zurueckkommen statt als 🔔).
+    bot_messages = [m for m in messages if is_own_message(m, own_user_id, own_bot_id)]
     print(
         f"[reminder] {len(messages)} Nachrichten in der Woche, "
         f"davon {len(bot_messages)} eigene."
@@ -140,7 +169,10 @@ def main() -> int:
             continue
         inline_count = sum(r.get("count", 0) for r in m.get("reactions", []))
         api_confirms = message_has_reaction(CHANNEL_ID, ts)
-        print(f"[reminder]   ts={ts}: inline_reactions={inline_count}, api_confirms={api_confirms}")
+        print(
+            f"[reminder]   ts={ts}: inline_reactions={inline_count}, "
+            f"api_confirms={api_confirms}"
+        )
         if inline_count > 0 or api_confirms:
             has_reaction = True
 
